@@ -1,9 +1,8 @@
 import pandas as pd
 import numpy as np
 from math import floor, ceil
-from scipy.fft import fft
-from scipy.signal import iirfilter
-from scipy.signal import lfilter
+from scipy.fft import fft, fftshift
+from scipy.signal import lfilter, freqs, filtfilt, iirfilter, windows
 import matplotlib.pyplot as plt
 import seaborn as sns
 from mplcursors import cursor
@@ -39,12 +38,18 @@ class Sensor:
         freq_array = np.arange(0,len(time_signals))*self.freq_step
         freq_array = freq_array - freq_array[floor(len(freq_array)/2)]
         freq_signals['freq'] = freq_array
+
+        # janelamento de Hamming (redução de leakage)
+        hamm = windows.hamming(len(freq_array))
+
         for c in ['x','y','z']:
             data = np.array(time_signals[c])
             data = data-data.mean()
-            fft_array = fft(data)
+            fft_array = fft(data, norm='forward')
+            fft_array = fftshift(fft_array)
             # calculo de amplitude e fase
-            abs_array = np.abs(fft_array)
+            abs_array = np.multiply(np.abs(fft_array),hamm)
+            # abs_array = np.abs(fft_array)
             phase_array = np.angle(fft_array)
             freq_signals[c] = abs_array
 
@@ -62,26 +67,53 @@ class Sensor:
         return freq_signals
 
     def filter(self, time_signals):
+        # filtro anti aliasing
         wn = max(self.freq_signals['freq'])/2
-        b, a = iirfilter(12, wn, btype='lowpass', ftype='butter')
+        b, a = iirfilter(12, wn*2*np.pi/2, btype='lowpass', ftype='butter', analog=False)
         filt_time_signals = pd.DataFrame()
         filt_time_signals['time'] = time_signals['time'] 
         for c in ['x','y','z']:
-            filt_data = lfilter(b,a,time_signals[c] - time_signals[c].mean())
+            filt_data = filtfilt(b,a,time_signals[c] - time_signals[c].mean())
             filt_time_signals[c] = filt_data
 
-        fig, axes = plt.subplots(3, 2, figsize=(15, 5), sharey=False)
-        g = sns.lineplot(filt_time_signals,x='time',y='x',ax=axes[0,0])
+        w, h = freqs(b, a, 100000)
+        fig = plt.figure()
+        ax = fig.add_subplot(1, 1, 1)
+        ax.semilogx(w / (2*np.pi), 20 * np.log10(np.maximum(abs(h), 1e-5)))
+        ax.set_title('Filter')
+        ax.set_xlabel('Frequency [Hz]')
+        ax.set_ylabel('Amplitude [dB]')
+        ax.grid(which='both', axis='both')
 
         cursor(hover=True)
         plt.show(block=False)
 
         return filt_time_signals
+    
+    def get_harmonics(self, filt_freq_signals):
+        filt_freq_signals = filt_freq_signals[floor(len(filt_freq_signals)/2):]
+        max_amp = 0
+
+        # encontra maior pico de amplitude
+        for c in ['x','y','z']:
+            id = np.argmax(filt_freq_signals[c])
+            max_amp_temp = filt_freq_signals[c].iloc[id]
+            if max_amp_temp > max_amp:
+                max_amp = max_amp_temp
+                max_freq_idx = filt_freq_signals['freq'].iloc[id]
+                pass
+
+        # varre multiplos da frequência (+-3*df)
+        # aceita como pico casos em que o valor max da região é maior que 10%
+        # do pico máximo
+        
+        pass
         
 
 for idx, filename in enumerate(os.listdir(path_1)):
     signals_dict[idx] = Sensor(path_1, filename)
     signals_dict[idx].freq_signals = signals_dict[idx].fft(signals_dict[idx].time_signals)
     signals_dict[idx].filt_time_signals = signals_dict[idx].filter(signals_dict[idx].time_signals)
-
-pass
+    signals_dict[idx].filt_freq_signals = signals_dict[idx].fft(signals_dict[idx].filt_time_signals)
+    signals_dict[idx].get_harmonics(signals_dict[idx].filt_freq_signals)
+    pass
