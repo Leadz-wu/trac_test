@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from math import floor, ceil
+from math import floor, ceil, log2
 from scipy.fft import fft, fftshift
 from scipy.signal import lfilter, freqs, filtfilt, iirfilter, windows
 import matplotlib.pyplot as plt
@@ -45,11 +45,11 @@ class Sensor:
         for c in ['x','y','z']:
             data = np.array(time_signals[c])
             data = data-data.mean()
+            time_signals[c] = np.multiply(data,hamm)
             fft_array = fft(data, norm='forward')
             fft_array = fftshift(fft_array)
             # calculo de amplitude e fase
-            abs_array = np.multiply(np.abs(fft_array),hamm)
-            # abs_array = np.abs(fft_array)
+            abs_array = np.abs(fft_array)
             phase_array = np.angle(fft_array)
             freq_signals[c] = abs_array
 
@@ -60,6 +60,8 @@ class Sensor:
         g = sns.lineplot(freq_signals,x='freq',y='y',ax=axes[1,1])
         g = sns.lineplot(time_signals,x='time',y='z',ax=axes[2,0])
         g = sns.lineplot(freq_signals,x='freq',y='z',ax=axes[2,1])
+        axes[0,0].set_title('{} - time'.format(self.sensor))
+        axes[0,1].set_title('{} - frequency'.format(self.sensor))
 
         cursor(hover=True)
         plt.show(block=False)
@@ -68,8 +70,8 @@ class Sensor:
 
     def filter(self, time_signals):
         # filtro anti aliasing
-        wn = max(self.freq_signals['freq'])/2
-        b, a = iirfilter(12, wn*2*np.pi/2, btype='lowpass', ftype='butter', analog=False)
+        wn = max(self.freq_signals['freq'])/2 # Nyquist freq
+        b, a = iirfilter(8, wn*2*np.pi/2, btype='lowpass', ftype='butter', analog=False)
         filt_time_signals = pd.DataFrame()
         filt_time_signals['time'] = time_signals['time'] 
         for c in ['x','y','z']:
@@ -92,21 +94,40 @@ class Sensor:
     
     def get_harmonics(self, filt_freq_signals):
         filt_freq_signals = filt_freq_signals[floor(len(filt_freq_signals)/2):]
-        max_amp = 0
+        max_freq_id = len(filt_freq_signals)
+        # encontra menor frequencia de pico de amplitude
+        for c in ['x','y','z']:
+            id = np.argmax(filt_freq_signals[c])
+            if max_freq_id > id:
+                max_freq_id = id
 
-        # encontra maior pico de amplitude
+        # varre multiplos da frequência (+-10*df) até Nyquist
+        harmonics = pd.DataFrame()
+        i = 1
+        while max_freq_id*i <= len(filt_freq_signals)/4:
+            amps = []
+            for c in ['x','y','z']:
+                id = max_freq_id*i
+                freq = filt_freq_signals['freq'].iloc[id]
+                amps = amps + [max(filt_freq_signals[c].iloc[id-10:id+11])]
+            amps = amps + [freq] + [i]
+            aux_df = pd.DataFrame(data=[amps], columns=['x','y','z','freq','mult'])
+            harmonics = pd.concat([harmonics,aux_df], axis=0)
+            i+=1
+        
+        self.get_harmonics = harmonics
+        return harmonics
+
         for c in ['x','y','z']:
             id = np.argmax(filt_freq_signals[c])
             max_amp_temp = filt_freq_signals[c].iloc[id]
             if max_amp_temp > max_amp:
                 max_amp = max_amp_temp
                 max_freq_idx = filt_freq_signals['freq'].iloc[id]
+                max_coord = c
                 pass
 
-        # varre multiplos da frequência (+-3*df)
-        # aceita como pico casos em que o valor max da região é maior que 10%
-        # do pico máximo
-        
+
         pass
         
 
@@ -115,5 +136,5 @@ for idx, filename in enumerate(os.listdir(path_1)):
     signals_dict[idx].freq_signals = signals_dict[idx].fft(signals_dict[idx].time_signals)
     signals_dict[idx].filt_time_signals = signals_dict[idx].filter(signals_dict[idx].time_signals)
     signals_dict[idx].filt_freq_signals = signals_dict[idx].fft(signals_dict[idx].filt_time_signals)
-    signals_dict[idx].get_harmonics(signals_dict[idx].filt_freq_signals)
+    print(signals_dict[idx].get_harmonics(signals_dict[idx].filt_freq_signals))
     pass
