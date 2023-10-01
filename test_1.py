@@ -117,18 +117,6 @@ class Sensor:
         
         self.get_harmonics = harmonics
         return harmonics
-
-        for c in ['x','y','z']:
-            id = np.argmax(filt_freq_signals[c])
-            max_amp_temp = filt_freq_signals[c].iloc[id]
-            if max_amp_temp > max_amp:
-                max_amp = max_amp_temp
-                max_freq_idx = filt_freq_signals['freq'].iloc[id]
-                max_coord = c
-                pass
-
-
-        pass
         
 
 for idx, filename in enumerate(os.listdir(path_1)):
